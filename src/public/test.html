@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <title>Reverb WebSocket Test (без Vite и Echo)</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            background: #111;
+            color: #eee;
+            padding: 20px;
+            line-height: 1.5;
+        }
+        h1 { color: #4ade80; }
+        #status {
+            padding: 12px;
+            border-radius: 6px;
+            font-weight: bold;
+            margin: 15px 0;
+        }
+        .ok     { background: #166534; color: #86efac; }
+        .err    { background: #7f1d1d; color: #fca5a5; }
+        .warn   { background: #713f12; color: #fcd34d; }
+        #log {
+            background: #1e1e1e;
+            padding: 15px;
+            border-radius: 8px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+            font-size: 14px;
+        }
+        input, button {
+            padding: 10px 14px;
+            margin: 8px 10px 8px 0;
+            border-radius: 6px;
+            border: none;
+        }
+        button { background: #2563eb; color: white; cursor: pointer; }
+        button:hover { background: #3b82f6; }
+        input { background: #222; color: #ddd; border: 1px solid #444; width: 320px; }
+    </style>
+</head>
+<body>
+
+<h1>Тест подключения к Laravel Reverb</h1>
+
+<div>
+    <label>REVERB_APP_KEY (из .env):</label><br>
+    <input type="text" id="appKey" value="" placeholder="вставьте ваш REVERB_APP_KEY" />
+</div>
+
+<div style="margin: 20px 0;">
+    <button onclick="connect()">Подключиться</button>
+    <button onclick="disconnect()">Отключиться</button>
+    <button onclick="clearLog()">Очистить лог</button>
+</div>
+
+<div id="status" class="warn">Статус: не подключено</div>
+
+<div id="log">Логи появятся здесь...\n</div>
+
+<!-- Используем версию Pusher JS 7.2 — она более дружелюбна к self-hosted Reverb -->
+<script src="https://js.pusher.com/7.2/pusher.min.js"></script>
+
+<script>
+    let pusher = null;
+    let channel = null;
+
+    const logEl    = document.getElementById('log');
+    const statusEl = document.getElementById('status');
+
+    function log(msg, type = 'info') {
+        const time = new Date().toLocaleTimeString();
+        logEl.innerHTML += `[${time}] ${msg}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+
+        if (type === 'error')   statusEl.className = 'err';
+        if (type === 'success') statusEl.className = 'ok';
+        if (type === 'warning') statusEl.className = 'warn';
+    }
+
+    function connect() {
+        const key = document.getElementById('appKey').value.trim();
+        if (!key) {
+            log('Ошибка: укажите REVERB_APP_KEY', 'error');
+            return;
+        }
+
+        if (pusher) {
+            log('Уже подключено. Сначала отключитесь.');
+            return;
+        }
+
+        log(`Попытка подключения с ключом: ${key}`);
+
+        // Конфигурация для Laravel Reverb (self-hosted)
+        pusher = new Pusher(key, {
+            wsHost:       'localhost',     // или 127.0.0.1, или IP сервера
+            wsPort:       8082,
+            forceTLS:     false,
+            encrypted:    false,
+            disableStats: true,
+            enabledTransports: ['ws'],
+
+        });
+
+        pusher.connection.bind('connected', () => {
+            log('WebSocket соединение установлено!', 'success');
+            statusEl.textContent = 'Статус: Подключено ✓';
+            statusEl.className = 'ok';
+        });
+
+        pusher.connection.bind('error', (err) => {
+            let msg = err.message || JSON.stringify(err);
+            if (err.data && err.data.code) msg += ` (код: ${err.data.code})`;
+            log('Ошибка соединения: ' + msg, 'error');
+            statusEl.textContent = 'Статус: Ошибка соединения';
+            statusEl.className = 'err';
+        });
+
+        pusher.connection.bind('disconnected', () => {
+            log('WebSocket отключён');
+            statusEl.textContent = 'Статус: Отключено';
+            statusEl.className = 'warn';
+        });
+
+        // Подписка на тестовый публичный канал
+        channel = pusher.subscribe('test-channel');
+
+        channel.bind('message', (data) => {
+            log('Получено событие message: ' + JSON.stringify(data), 'success');
+        });
+
+        channel.bind('TestEvent', (data) => {
+            log('Получено событие TestEvent: ' + JSON.stringify(data), 'success');
+        });
+
+        channel.bind('pusher:subscription_succeeded', () => {
+            log('Успешно подписались на канал test-channel');
+        });
+
+        channel.bind('pusher:subscription_error', (err) => {
+            log('Ошибка подписки: ' + JSON.stringify(err), 'error');
+        });
+    }
+
+    function disconnect() {
+        if (pusher) {
+            pusher.disconnect();
+            pusher = null;
+            channel = null;
+            log('Принудительное отключение');
+            statusEl.textContent = 'Статус: Отключено';
+            statusEl.className = 'warn';
+        }
+    }
+
+    function clearLog() {
+        logEl.innerHTML = '';
+        statusEl.textContent = 'Статус: не подключено';
+        statusEl.className = 'warn';
+    }
+</script>
+
+</body>
+</html>
